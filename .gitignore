@@ -1,22 +1,16 @@
-# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Virtual environment
 venv/
 .env/
 
-# Mac
 .DS_Store
 
-# Models
 *.pt
 *.pth
 
-# Data
 data/
 
-# VSCode
 .vscode/

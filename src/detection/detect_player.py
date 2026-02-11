@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 
 
+
 class PlayerDetector:
     def __init__(self, model_path, conf_threshold=0.3):
         self.model = YOLO(model_path)

@@ -1,16 +1,4 @@
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
 
 venv/
 .env/
 
-.DS_Store
-
-*.pt
-*.pth
-
-data/
-
-.vscode/

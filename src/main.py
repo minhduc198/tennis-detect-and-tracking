@@ -1,4 +1,3 @@
-# src/main.py
 
 import cv2
 from detection.detect_player import PlayerDetector

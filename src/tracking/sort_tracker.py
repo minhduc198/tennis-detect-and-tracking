@@ -1,74 +1,80 @@
-import numpy as np
-from scipy.optimize import linear_sum_assignment
+import math
 from .kalman import KalmanFilter
 
 class SortTracker:
     def __init__(self, iou_threshold=0.3):
-        self.iou_threshold = iou_threshold
-        self.trackers = {}  
-        self.next_id = 1
+        self.max_age = 60 
+        self.trackers = {
+            1: {'kf': KalmanFilter(), 'bbox': None, 'active': False, 'missed': 0}, 
+            2: {'kf': KalmanFilter(), 'bbox': None, 'active': False, 'missed': 0}  
+        }
 
     def update(self, detections):
-        """
-        Input: Detections [[x1, y1, x2, y2, conf], ...]
-        Output: Kết quả đã gán ID [[x1, y1, x2, y2, track_id], ...]
-        """
-           
-        predicted_tracks = {}
-        for tid, data in self.trackers.items():
-            pred_x, pred_y = data['kf'].predict()
-  
-            w = data['bbox'][2] - data['bbox'][0]
-            h = data['bbox'][3] - data['bbox'][1]
-            predicted_tracks[tid] = [pred_x, pred_y, pred_x + w, pred_y + h]
+        valid_dets = [d for d in detections if len(d) >= 4]
+        unique_dets = []
+        for det in valid_dets:
+            cx, cy = (det[0]+det[2])/2, (det[1]+det[3])/2
+            is_dup = False
+            for u in unique_dets:
+                ux, uy = (u[0]+u[2])/2, (u[1]+u[3])/2
+                if math.hypot(cx - ux, cy - uy) < 100:
+                    is_dup = True
+                    break
+            if not is_dup:
+                unique_dets.append(det)
+
+        unique_dets.sort(key=lambda x: x[3], reverse=True)
+        matched_pids = set()
+
+        # 2. GÁN ID CỐ ĐỊNH (LUẬT THÉP)
+        if len(unique_dets) >= 2:
+            self._update_tracker(1, unique_dets[0][:4])
+            self._update_tracker(2, unique_dets[-1][:4])
+            matched_pids.update([1, 2])
+            
+        elif len(unique_dets) == 1:
+            det = unique_dets[0]
+            cx, cy = (det[0]+det[2])/2, (det[1]+det[3])/2
+            best_pid = 1
+            
+            if self.trackers[1]['active'] and self.trackers[2]['active']:
+                b1 = self.trackers[1]['bbox']
+                d1 = math.hypot(cx - (b1[0]+b1[2])/2, cy - (b1[1]+b1[3])/2)
+                
+                b2 = self.trackers[2]['bbox']
+                d2 = math.hypot(cx - (b2[0]+b2[2])/2, cy - (b2[1]+b2[3])/2)
+                
+                best_pid = 1 if d1 < d2 else 2
+            elif self.trackers[2]['active']:
+                best_pid = 2
+                
+            self._update_tracker(best_pid, det[:4])
+            matched_pids.add(best_pid)
 
         final_results = []
-        if len(detections) > 0 and len(predicted_tracks) > 0:
-            track_ids = list(predicted_tracks.keys())
-            pred_boxes = list(predicted_tracks.values())
+        for pid in [1, 2]:
+            if pid not in matched_pids and self.trackers[pid]['active']:
+                self.trackers[pid]['missed'] += 1
+                
+                if self.trackers[pid]['missed'] < self.max_age:
+                    pass 
+                else:
+                    self.trackers[pid]['active'] = False
 
-            iou_matrix = np.zeros((len(detections), len(pred_boxes)))
-            for i, det in enumerate(detections):
-                for j, pred in enumerate(pred_boxes):
-                    iou_matrix[i, j] = self._get_iou(det[:4], pred)
-
-            row_ind, col_ind = linear_sum_assignment(1 - iou_matrix)
-
-            matched_det_indices = set()
-            for r, c in zip(row_ind, col_ind):
-                if iou_matrix[r, c] >= self.iou_threshold:
-                    tid = track_ids[c]
-                    bbox = detections[r][:4]
-        
-                    cx, cy = (bbox[0]+bbox[2])/2, (bbox[1]+bbox[3])/2
-                    self.trackers[tid]['kf'].update(cx, cy)
-                    self.trackers[tid]['bbox'] = bbox
-                    
-                    final_results.append(list(bbox) + [tid])
-                    matched_det_indices.add(r)
-
-            for i, det in enumerate(detections):
-                if i not in matched_det_indices:
-                    self._add_new_track(det[:4], final_results)
-        else:
-
-            for det in detections:
-                self._add_new_track(det[:4], final_results)
+            if self.trackers[pid]['active']:
+                final_results.append(list(self.trackers[pid]['bbox']) + [pid])
 
         return final_results
 
-    def _add_new_track(self, bbox, results_list):
-        kf = KalmanFilter()
+    def _update_tracker(self, pid, bbox):
         cx, cy = (bbox[0]+bbox[2])/2, (bbox[1]+bbox[3])/2
-        kf.update(cx, cy)
-        self.trackers[self.next_id] = {'kf': kf, 'bbox': bbox}
-        results_list.append(list(bbox) + [self.next_id])
-        self.next_id += 1
 
-    def _get_iou(self, box1, box2):
-        x1 = max(box1[0], box2[0]); y1 = max(box1[1], box2[1])
-        x2 = min(box1[2], box2[2]); y2 = min(box1[3], box2[3])
-        inter = max(0, x2 - x1) * max(0, y2 - y1)
-        area1 = (box1[2]-box1[0])*(box1[3]-box1[1])
-        area2 = (box2[2]-box2[0])*(box2[3]-box2[1])
-        return inter / float(area1 + area2 - inter + 1e-6)
+        if not self.trackers[pid]['active'] or self.trackers[pid]['missed'] > 0:
+            self.trackers[pid]['kf'] = KalmanFilter()
+            
+        self.trackers[pid]['kf'].predict()
+        self.trackers[pid]['kf'].update(cx, cy)
+        
+        self.trackers[pid]['bbox'] = bbox
+        self.trackers[pid]['active'] = True
+        self.trackers[pid]['missed'] = 0

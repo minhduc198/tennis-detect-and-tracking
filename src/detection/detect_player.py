@@ -44,7 +44,8 @@ class PlayerDetector:
 
                 if h < 0.05 * H:
                     continue
-
+                if x1 < 0.1 * W or x2 > 0.9 * W:
+                    continue                    
                 if motion_mask is not None:
                     roi = motion_mask[y1:y2, x1:x2]
                     motion_score = np.sum(roi) / 255

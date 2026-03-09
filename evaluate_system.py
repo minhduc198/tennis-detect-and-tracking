@@ -7,7 +7,6 @@ from src.evaluation.metrics import iou, detection_metrics, tracking_metrics
 from src.evaluation.analysis import (plot_boxes, compute_blur_score,find_blurry_frames, detect_occlusion)
 
 
-# LOAD DỮ LIỆU
 def load_coco_gt(json_path: str) -> dict:
     with open(json_path) as f:
         data = json.load(f)
@@ -41,7 +40,6 @@ def load_predictions(pred_boxes_path: str, pred_tracks_path: str):
     with open(pred_tracks_path) as f:
         raw_tracks = json.load(f)
 
-    # JSON lưu key là string → chuyển sang int
     pred_boxes  = {int(k): v for k, v in raw_boxes.items()}
     pred_tracks = {int(k): v for k, v in raw_tracks.items()}
 
@@ -49,12 +47,8 @@ def load_predictions(pred_boxes_path: str, pred_tracks_path: str):
 
 
 
-# ĐÁNH GIÁ CHÍNH
 def run_detection_evaluation(gt_data: dict, pred_boxes: dict) -> dict:
-    """
-    Tính detection metrics (precision, recall, f1) trên tất cả frame có GT.
-    So sánh output của YOLO với ground truth từ CVAT.
-    """
+  
     print("=" * 60)
     print("DETECTION METRICS")
     print("=" * 60)
@@ -64,7 +58,6 @@ def run_detection_evaluation(gt_data: dict, pred_boxes: dict) -> dict:
     for frame_idx in sorted(gt_data.keys()):
         gt_boxes = gt_data[frame_idx]['boxes']
 
-        # Lấy prediction của frame này (hoặc rỗng nếu không có)
         preds = pred_boxes.get(frame_idx, [])
 
         dm = detection_metrics(gt_boxes, preds, iou_threshold=0.5)
@@ -102,15 +95,11 @@ def run_detection_evaluation(gt_data: dict, pred_boxes: dict) -> dict:
 
 
 def run_tracking_evaluation(gt_data: dict, pred_tracks: dict) -> dict:
-    """
-    Tính tracking metrics (MOTA, MOTP, id_switches) trên toàn bộ video.
-    Đánh giá SortTracker có giữ đúng ID qua các frame không.
-    """
+  
     print("\n" + "=" * 60)
     print("TRACKING METRICS")
     print("=" * 60)
 
-    # Chuẩn bị gt_tracks đúng format cho tracking_metrics()
     gt_tracks = {
         fi: gt_data[fi]['tracks']
         for fi in gt_data
@@ -135,10 +124,6 @@ def run_tracking_evaluation(gt_data: dict, pred_tracks: dict) -> dict:
 
 
 def run_blur_evaluation(video_path: str) -> dict:
-    """
-    Phân tích chất lượng video — tìm frame bị mờ.
-    Frame mờ làm giảm độ chính xác của YOLO.
-    """
     print("\n" + "=" * 60)
     print("CHẤT LƯỢNG VIDEO (BLUR ANALYSIS)")
     print("=" * 60)
@@ -194,7 +179,6 @@ def visualize_sample_frames(gt_data: dict, pred_boxes: dict,
     cap = cv2.VideoCapture(video_path)
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    # Chọn frame đều nhau trong video
     sample_frames = sorted(gt_data.keys())[::max(1, len(gt_data) // num_samples)][:num_samples]
 
     images, titles = [], []
@@ -209,7 +193,6 @@ def visualize_sample_frames(gt_data: dict, pred_boxes: dict,
         preds      = pred_boxes.get(frame_idx, [])
         pred_b     = [[p[0], p[1], p[2], p[3]] for p in preds]
 
-        # Vẽ GT (xanh lá) và Prediction (đỏ) lên cùng 1 frame
         vis = plot_boxes(frame, gt_boxes,  color=(0, 255, 0), labels=[f"GT{i+1}" for i in range(len(gt_boxes))])
         vis = plot_boxes(vis,   pred_b,    color=(0, 0, 255), labels=[f"P{i+1}"  for i in range(len(pred_b))])
 
@@ -222,7 +205,6 @@ def visualize_sample_frames(gt_data: dict, pred_boxes: dict,
         print("  Không có frame nào để visualize.")
         return
 
-    # Tạo grid ảnh
     cols = 3
     rows = (len(images) + cols - 1) // cols
     fig, axes = plt.subplots(rows, cols, figsize=(15, 5 * rows))
@@ -254,7 +236,6 @@ if __name__ == "__main__":
     print("\n TENNIS TRACKING — ĐÁNH GIÁ HỆ THỐNG")
     print("=" * 60)
 
-    # ── 1. Load dữ liệu ────────────────────────────────────────────
     print("\n Đang load dữ liệu...")
 
     gt_data = load_coco_gt("annotations/instances_default.json")
@@ -263,17 +244,14 @@ if __name__ == "__main__":
     print(f"  GT frames loaded    : {len(gt_data)}")
     print(f"  Pred frames loaded  : {len(pred_boxes)}")
 
-    # ── 2. Chạy đánh giá ───────────────────────────────────────────
     det_result = run_detection_evaluation(gt_data, pred_boxes)
     trk_result = run_tracking_evaluation(gt_data, pred_tracks)
     occ_result = run_occlusion_analysis(gt_data)
 
-    # ── 3. Visualize (cần video gốc) ───────────────────────────────
     VIDEO_PATH = "data/raw_video/tennis_input6.mp4"
     visualize_sample_frames(gt_data, pred_boxes, VIDEO_PATH) 
     run_blur_evaluation(VIDEO_PATH)                           
 
-    # ── 4. Tóm tắt kết quả ─────────────────────────────────────────
     print("\n" + "=" * 60)
     print("TÓM TẮT KẾT QUẢ")
     print("=" * 60)

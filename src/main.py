@@ -1,18 +1,18 @@
 import cv2
 import os
+import json
 
 from detection.detect_player import PlayerDetector
 from tracking.sort_tracker import SortTracker
-
 from visualization.draw_bbox_trackid import draw_bbox_with_trackid
-
-from evaluation.metrics import DetectionMetrics, TrackingMetrics
-from evaluation.analysis import plot_detection_stats, plot_tracking_stats
 
 
 VIDEO_PATH = "data/raw_video/tennis_input6.mp4"
 MODEL_PATH = "models/detection/yolo_player.pt"
 OUTPUT_VIDEO = "data/processed_video/tennis_output_tracked.mp4"
+
+PRED_BOXES_PATH = "pred_boxes.json"
+PRED_TRACKS_PATH = "pred_tracks.json"
 
 
 def main():
@@ -21,7 +21,6 @@ def main():
 
     if not cap.isOpened():
         raise RuntimeError("Cannot open video file")
-
 
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -42,11 +41,12 @@ def main():
     )
 
     tracker = SortTracker(iou_threshold=0.3)
-    det_metrics = DetectionMetrics()
-    track_metrics = TrackingMetrics()
 
     frame_count = 0
     saved_sample = False
+
+    pred_boxes = {}
+    pred_tracks = {}
 
     print("Processing video...")
 
@@ -61,16 +61,13 @@ def main():
 
         detections = detector.detect(frame)
 
-        det_metrics.update(detections)
-
+        pred_boxes[frame_count] = detections
 
         tracked_players = tracker.update(detections)
 
-        track_metrics.update(tracked_players)
-
+        pred_tracks[frame_count] = tracked_players
 
         vis_frame = draw_bbox_with_trackid(frame, tracked_players)
-
 
         if not saved_sample and len(tracked_players) > 0:
 
@@ -83,38 +80,31 @@ def main():
 
             saved_sample = True
 
-
         cv2.imshow("Tennis Player Tracking", vis_frame)
-
 
         writer.write(vis_frame)
 
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
-
     cap.release()
     writer.release()
     cv2.destroyAllWindows()
 
+    print("Saving prediction results...")
 
+    with open(PRED_BOXES_PATH, "w") as f:
+        json.dump(pred_boxes, f)
 
-    det_summary = det_metrics.summary()
-    track_summary = track_metrics.summary()
+    with open(PRED_TRACKS_PATH, "w") as f:
+        json.dump(pred_tracks, f)
 
-    print("\n===== Detection Metrics =====")
-    print(det_summary)
+    print("Prediction files saved:")
+    print(" - pred_boxes.json")
+    print(" - pred_tracks.json")
 
-    print("\n===== Tracking Metrics =====")
-    print(track_summary)
-
-  
-
-    plot_detection_stats(det_summary)
-    plot_tracking_stats(track_summary)
-
-    print("\nEvaluation images saved in /evaluation_results/")
-    print("Output video saved:", OUTPUT_VIDEO)
+    print("\nOutput video saved:", OUTPUT_VIDEO)
+    print("Sample frame saved in /evaluation_results/")
 
 
 if __name__ == "__main__":

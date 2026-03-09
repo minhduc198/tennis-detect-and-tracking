@@ -23,7 +23,7 @@ class PlayerDetector:
 
         self.prev_gray = gray
 
-        results = self.model(frame, imgsz=512, verbose=False)
+        results = self.model(frame, imgsz=640, verbose=False)
 
         candidates = []
 
@@ -50,7 +50,7 @@ class PlayerDetector:
                     roi = motion_mask[y1:y2, x1:x2]
                     motion_score = np.sum(roi) / 255
 
-                    if motion_score < 50:
+                    if motion_score <80:
                         continue
 
                 candidates.append([x1, y1, x2, y2, conf, h])

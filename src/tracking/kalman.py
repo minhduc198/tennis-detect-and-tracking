@@ -24,11 +24,9 @@ class KalmanFilter:
         self.kf.errorCovPost = np.eye(4, dtype=np.float32)
 
     def predict(self):
-        """Dự đoán vị trí tiếp theo"""
         prediction = self.kf.predict()
         return int(prediction[0]), int(prediction[1])
 
     def update(self, x, y):
-        """Cập nhật trạng thái dựa trên tọa độ thực tế từ Detection"""
         measurement = np.array([[np.float32(x)], [np.float32(y)]])
         self.kf.correct(measurement)

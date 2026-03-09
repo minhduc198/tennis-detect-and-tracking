@@ -26,7 +26,6 @@ class SortTracker:
         unique_dets.sort(key=lambda x: x[3], reverse=True)
         matched_pids = set()
 
-        # 2. GÁN ID CỐ ĐỊNH (LUẬT THÉP)
         if len(unique_dets) >= 2:
             self._update_tracker(1, unique_dets[0][:4])
             self._update_tracker(2, unique_dets[-1][:4])

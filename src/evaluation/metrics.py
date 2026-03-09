@@ -1,51 +1,149 @@
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 
-class DetectionMetrics:
-    def __init__(self):
-        self.total_detections = 0
-        self.frames = 0
+def iou(boxA, boxB):  # Tính IoU giữa hai bounding box A và B
+    xA = max(boxA[0], boxB[0])
+    yA = max(boxA[1], boxB[1])
+    xB = min(boxA[2], boxB[2])
+    yB = min(boxA[3], boxB[3])
 
-    def update(self, detections):
-     
-        self.total_detections += len(detections)
-        self.frames += 1
+    interW = max(0, xB - xA)
+    interH = max(0, yB - yA)
+    interArea = interW * interH
 
-    def summary(self):
-        avg_det = 0
-        if self.frames > 0:
-            avg_det = self.total_detections / self.frames
+    boxAArea = max(0, (boxA[2] - boxA[0])) * max(0, (boxA[3] - boxA[1]))
+    boxBArea = max(0, (boxB[2] - boxB[0])) * max(0, (boxB[3] - boxB[1]))
 
-        return {
-            "frames_processed": self.frames,
-            "total_detections": self.total_detections,
-            "avg_detections_per_frame": round(avg_det, 2),
-        }
+    if boxAArea + boxBArea - interArea == 0:
+        return 0.0
+    return interArea / float(boxAArea + boxBArea - interArea)
 
 
-class TrackingMetrics:
-    def __init__(self):
-        self.track_ids = set()
-        self.id_switches = 0
-        self.prev_ids = set()
+def match_boxes(gt_boxes, pred_boxes, iou_threshold=0.5):
+    """Greedy matching between ground truth and prediction boxes using IoU.
 
-    def update(self, tracked_objects):
-       
+    Returns lists of matched pairs (gt_idx, pred_idx),
+    unmatched_gt_indices, unmatched_pred_indices.
+    """
+    if len(gt_boxes) == 0 or len(pred_boxes) == 0:
+        return [], list(range(len(gt_boxes))), list(range(len(pred_boxes)))
 
-        current_ids = set()
+    iou_matrix = np.zeros((len(gt_boxes), len(pred_boxes)), dtype=np.float32)
+    for i, gt in enumerate(gt_boxes):
+        for j, pred in enumerate(pred_boxes):
+            iou_matrix[i, j] = iou(gt, pred[:4])
 
-        for obj in tracked_objects:
-            track_id = int(obj[4])
-            current_ids.add(track_id)
-            self.track_ids.add(track_id)
+    # Hungarian algorithm for maximal matching
+    gt_idx, pred_idx = linear_sum_assignment(-iou_matrix)
 
-        if self.prev_ids and current_ids != self.prev_ids:
-            self.id_switches += 1
+    matches = []
+    unmatched_gt = []
+    unmatched_pred = []
 
-        self.prev_ids = current_ids
+    for i in range(len(gt_boxes)):
+        if i not in gt_idx:
+            unmatched_gt.append(i)
+    for j in range(len(pred_boxes)):
+        if j not in pred_idx:
+            unmatched_pred.append(j)
 
-    def summary(self):
-        return {
-            "total_unique_players": len(self.track_ids),
-            "id_switches": self.id_switches
-        }
+    for g, p in zip(gt_idx, pred_idx):
+        if iou_matrix[g, p] >= iou_threshold:
+            matches.append((g, p))
+        else:
+            unmatched_gt.append(g)
+            unmatched_pred.append(p)
+
+    return matches, unmatched_gt, unmatched_pred
+
+
+def detection_metrics(gt_boxes, pred_boxes, iou_threshold=0.5):
+    """Compute basic detection metrics (precision, recall, f1) between
+    ground truth and predicted boxes.
+
+    - gt_boxes: list of [x1,y1,x2,y2]
+    - pred_boxes: list of [x1,y1,x2,y2,confidence] or same without confidence.
+
+    Returns a dictionary with keys: precision, recall, f1, tp, fp, fn.
+    """
+    matches, unmatched_gt, unmatched_pred = match_boxes(gt_boxes, pred_boxes, iou_threshold)
+    tp = len(matches)
+    fp = len(unmatched_pred)
+    fn = len(unmatched_gt)
+
+    precision = tp / (tp + fp) if tp + fp > 0 else 0.0
+    recall = tp / (tp + fn) if tp + fn > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall > 0 else 0.0
+
+    return {
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+    }
+
+
+def tracking_metrics(gt_tracks, pred_tracks, iou_threshold=0.5):
+    """Evaluate simple tracking metrics across a sequence.
+
+    gt_tracks and pred_tracks should be dictionaries keyed by frame index,
+    each value is a list of dictionaries with keys box and id.
+    Example:
+        gt_tracks[10] = [{'bbox': [x1,y1,x2,y2], 'id': 3}, ...]
+    """
+    total_gt = 0
+    misses = 0
+    false_positives = 0
+    id_switches = 0
+    iou_sum = 0.0
+    iou_count = 0
+    prev_assignment = {}  # gt_id -> pred_id
+
+    for frame, gt_list in gt_tracks.items():
+        pred_list = pred_tracks.get(frame, [])
+        total_gt += len(gt_list)
+
+        # build arrays for matching
+        gt_boxes = [g['bbox'] for g in gt_list]
+        pred_boxes = [p['bbox'] for p in pred_list]
+        matches, unmatched_gt, unmatched_pred = match_boxes(gt_boxes, pred_boxes, iou_threshold)
+
+        misses += len(unmatched_gt)
+        false_positives += len(unmatched_pred)
+
+        # compute IoU for matched pairs
+        for g_idx, p_idx in matches:
+            iou_sum += iou(gt_boxes[g_idx], pred_boxes[p_idx])
+            iou_count += 1
+            gt_id = gt_list[g_idx]['id']
+            pred_id = pred_list[p_idx]['id']
+            if gt_id in prev_assignment and prev_assignment[gt_id] != pred_id:
+                id_switches += 1
+            prev_assignment[gt_id] = pred_id
+
+    mota = 1.0 - (misses + false_positives + id_switches) / total_gt if total_gt > 0 else 0.0
+    motp = iou_sum / iou_count if iou_count > 0 else 0.0
+
+    return {
+        "MOTA": mota,
+        "MOTP": motp,
+        "id_switches": id_switches,
+        "false_positives": false_positives,
+        "misses": misses,
+        "total_gt": total_gt,
+    }
+
+
+if __name__ == "__main__":
+    # minimal sanity check
+    gt = [[0, 0, 10, 10], [20, 20, 30, 30]]
+    pred = [[0, 0, 10, 10, 0.9], [15, 15, 25, 25, 0.8]]
+    print("detection metrics", detection_metrics(gt, pred))
+
+    # tracking example
+    gt_tracks = {0: [{'bbox': [0,0,10,10], 'id': 1}], 1: [{'bbox': [1,1,11,11], 'id': 1}]}
+    pred_tracks = {0: [{'bbox': [0,0,10,10], 'id': 5}], 1: [{'bbox': [1,1,11,11], 'id': 6}]}
+    print("tracking metrics", tracking_metrics(gt_tracks, pred_tracks))

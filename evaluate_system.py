@@ -34,14 +34,42 @@ def load_coco_gt(json_path: str) -> dict:
 
 
 def load_predictions(pred_boxes_path: str, pred_tracks_path: str):
+
     with open(pred_boxes_path) as f:
         raw_boxes = json.load(f)
 
     with open(pred_tracks_path) as f:
         raw_tracks = json.load(f)
 
-    pred_boxes  = {int(k): v for k, v in raw_boxes.items()}
-    pred_tracks = {int(k): v for k, v in raw_tracks.items()}
+    pred_boxes = {int(k): v for k, v in raw_boxes.items()}
+
+    pred_tracks = {}
+
+    for frame, tracks in raw_tracks.items():
+
+        frame = int(frame)
+        converted = []
+
+        for t in tracks:
+
+            if isinstance(t, list):
+
+                if len(t) >= 5:
+                    converted.append({
+                        "bbox": t[:4],
+                        "id": int(t[4])
+                    })
+
+                elif len(t) == 4:
+                    converted.append({
+                        "bbox": t,
+                        "id": -1
+                    })
+
+            elif isinstance(t, dict):
+                converted.append(t)
+
+        pred_tracks[frame] = converted
 
     return pred_boxes, pred_tracks
 
